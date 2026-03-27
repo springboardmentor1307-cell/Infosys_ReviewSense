@@ -100,28 +100,38 @@ def milestone3_keywords(df: pd.DataFrame) -> pd.DataFrame:
 
 def run_pipeline(uploaded_file) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run full M1→M2→M3 pipeline on an uploaded file."""
-    name = uploaded_file.name.lower()
-    if name.endswith(".csv"):
-        raw = pd.read_csv(uploaded_file)
-    else:
-        raw = pd.read_excel(uploaded_file)
+    try:
+        name = uploaded_file.name.lower()
+        if name.endswith(".csv"):
+            raw = pd.read_csv(uploaded_file)
+        else:
+            raw = pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"❌ Failed to read file: {str(e)}")
+        st.stop()
+        return None, None
 
     required = {"feedback", "date", "product"}
     missing = required - set(raw.columns)
     if missing:
         st.error(f"❌ Missing columns: {missing}. File needs: feedback, date, product.")
         st.stop()
+        return None, None
 
-    with st.spinner("🔄 Running Milestone 1 – Cleaning text…"):
-        df = milestone1_clean(raw)
-    with st.spinner("🧠 Running Milestone 2 – Sentiment analysis…"):
-        df = milestone2_sentiment(df)
-    with st.spinner("🔑 Running Milestone 3 – Keyword extraction…"):
-        kdf = milestone3_keywords(df)
+    try:
+        with st.spinner("🔄 Running Milestone 1 – Cleaning text…"):
+            df = milestone1_clean(raw)
+        with st.spinner("🧠 Running Milestone 2 – Sentiment analysis…"):
+            df = milestone2_sentiment(df)
+        with st.spinner("🔑 Running Milestone 3 – Keyword extraction…"):
+            kdf = milestone3_keywords(df)
 
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df["sentiment"] = df["sentiment"].str.lower().str.strip()
-    return df, kdf
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df["sentiment"] = df["sentiment"].str.lower().str.strip()
+        return df, kdf
+    except Exception as e:
+        st.error(f"❌ Pipeline error: {str(e)}")
+        return None, None
 
 # ─────────────────────────────────────────────
 # 4. GLOBAL CSS
@@ -471,8 +481,11 @@ def render_sidebar(df, role):
 
         st.divider()
         if st.button("🚪 Logout", use_container_width=True):
-            for k in ["authenticated","username","role","pipeline_df","keywords_df"]:
-                st.session_state[k] = False if k == "authenticated" else (None if "df" in k else "")
+            st.session_state.authenticated = False
+            st.session_state.username = ""
+            st.session_state.role = ""
+            st.session_state.pipeline_df = None
+            st.session_state.keywords_df = None
             st.rerun()
 
     return filters
@@ -629,14 +642,10 @@ def admin_dashboard():
     prod_sent["Positive%"] = (prod_sent["positive"]/prod_sent["Total"]*100).round(1)
     prod_sent = prod_sent.sort_values("Positive%", ascending=False)
 
-    st.dataframe(
-        prod_sent[["positive","negative","neutral","Total","Positive%"]]
-        .rename(columns={"positive":"👍 Positive","negative":"👎 Negative",
-                         "neutral":"➖ Neutral","Positive%":"✅ Positive %"})
-        .style.format({"✅ Positive %":"{:.1f}%"})
-        .background_gradient(subset=["✅ Positive %"], cmap="RdYlGn"),
-        use_container_width=True
-    )
+    display_df = prod_sent[["positive","negative","neutral","Total","Positive%"]].copy()
+    display_df.columns = ["👍 Positive","👎 Negative","➖ Neutral","Total","✅ Positive %"]
+    display_df["✅ Positive %"] = display_df["✅ Positive %"].round(1)
+    st.dataframe(display_df, use_container_width=True)
 
     # Heatmap
     if len(prod_sent) <= 20:
